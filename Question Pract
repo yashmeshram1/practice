@@ -1,0 +1,416 @@
+// ===== MODELS =====
+
+// course.model.ts
+export interface Course {
+  id: number;
+  courseName: string;
+  enrollmentCount: number;
+  publishDate: string;
+  status: 'Draft' | 'Published' | 'Archived' | 'Retired';
+  category: string;
+}
+
+// ===== SERVICES =====
+
+// course.service.ts
+import { Injectable } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
+import { Observable } from 'rxjs';
+import { environment } from '../environments/environment';
+
+@Injectable({
+  providedIn: 'root'
+})
+export class CourseService {
+  private apiUrl: string;
+
+  constructor(private http: HttpClient) {
+    this.apiUrl = environment.apiUrl + '/courses';
+  }
+
+  // Get all courses
+  getCourses(): Observable<Course[]> {
+    return this.http.get<Course[]>(this.apiUrl);
+  }
+
+  // Get specific course by ID
+  getCourse(id: number): Observable<Course> {
+    return this.http.get<Course>(`${this.apiUrl}/${id}`);
+  }
+
+  // Add new course
+  addCourse(course: Course): Observable<Course> {
+    return this.http.post<Course>(this.apiUrl, course);
+  }
+
+  // Update existing course
+  updateCourse(id: number, course: Course): Observable<Course> {
+    return this.http.put<Course>(`${this.apiUrl}/${id}`, course);
+  }
+
+  // Delete course
+  deleteCourse(id: number): Observable<void> {
+    return this.http.delete<void>(`${this.apiUrl}/${id}`);
+  }
+}
+
+// ===== COMPONENTS =====
+
+// course-details.component.ts
+import { Component, OnInit } from '@angular/core';
+import { ActivatedRoute } from '@angular/router';
+import { Observable } from 'rxjs';
+import { CourseService } from '../services/course.service';
+import { Course } from '../models/course.model';
+
+@Component({
+  selector: 'app-course-details',
+  templateUrl: './course-details.component.html',
+  styleUrls: ['./course-details.component.css']
+})
+export class CourseDetailsComponent implements OnInit {
+  course$: Observable<Course> = new Observable();
+
+  constructor(
+    private courseService: CourseService,
+    private route: ActivatedRoute
+  ) {}
+
+  ngOnInit(): void {
+    // Subscribe to route parameters to get course ID
+    this.route.params.subscribe(params => {
+      const courseId = +params['id'];
+      if (courseId) {
+        this.getCourse(courseId);
+      }
+    });
+  }
+
+  private getCourse(id: number): void {
+    this.course$ = this.courseService.getCourse(id);
+  }
+}
+
+// course-list.component.ts
+import { Component, OnInit } from '@angular/core';
+import { Observable } from 'rxjs';
+import { CourseService } from '../services/course.service';
+import { Course } from '../models/course.model';
+
+@Component({
+  selector: 'app-course-list',
+  templateUrl: './course-list.component.html',
+  styleUrls: ['./course-list.component.css']
+})
+export class CourseListComponent implements OnInit {
+  courses$: Observable<Course[]> = new Observable();
+  filteredCourses$: Observable<Course[]> = new Observable();
+
+  constructor(private courseService: CourseService) {}
+
+  ngOnInit(): void {
+    this.getCourses();
+  }
+
+  private getCourses(): void {
+    this.courses$ = this.courseService.getCourses();
+    this.filteredCourses$ = this.courses$;
+  }
+
+  searchCourses(event: any): void {
+    const searchTerm = event.target.value.toLowerCase();
+    
+    if (!searchTerm.trim()) {
+      // Reset to full course list if search is empty
+      this.filteredCourses$ = this.courses$;
+    } else {
+      // Filter courses based on search term (case-sensitive as mentioned in docs)
+      this.filteredCourses$ = new Observable(observer => {
+        this.courses$.subscribe(courses => {
+          const filtered = courses.filter(course => 
+            course.courseName.includes(searchTerm) || 
+            course.id.toString().includes(searchTerm)
+          );
+          observer.next(filtered);
+        });
+      });
+    }
+  }
+}
+
+// course-form.component.ts
+import { Component, OnInit } from '@angular/core';
+import { FormBuilder, FormGroup, Validators, AbstractControl, ValidationErrors } from '@angular/forms';
+import { Router } from '@angular/router';
+import { CourseService } from '../services/course.service';
+import { Course } from '../models/course.model';
+
+@Component({
+  selector: 'app-course-form',
+  templateUrl: './course-form.component.html',
+  styleUrls: ['./course-form.component.css']
+})
+export class CourseFormComponent implements OnInit {
+  courseForm: FormGroup;
+  courseStatus = ['Draft', 'Published', 'Archived', 'Retired'];
+
+  constructor(
+    private fb: FormBuilder,
+    private router: Router,
+    private courseService: CourseService
+  ) {
+    this.courseForm = this.createForm();
+  }
+
+  ngOnInit(): void {
+    this.initializeForm();
+  }
+
+  private createForm(): FormGroup {
+    return this.fb.group({
+      courseName: ['', Validators.required],
+      enrollmentCount: [1, [Validators.required, Validators.min(1)]],
+      status: [this.courseStatus[0]], // defaults to first status
+      publishDate: ['', [Validators.required, this.dateValidator]],
+      category: ['', Validators.required]
+    });
+  }
+
+  private initializeForm(): void {
+    // Initialize reactive form with form controls and validators
+    this.markFormGroupTouched(this.courseForm);
+  }
+
+  // Custom date validator to ensure YYYY-MM-DD format
+  private dateValidator(control: AbstractControl): ValidationErrors | null {
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (control.value && !dateRegex.test(control.value)) {
+      return { invalidDate: true };
+    }
+    return null;
+  }
+
+  onSubmit(): void {
+    if (this.courseForm.valid) {
+      const courseData: Course = {
+        id: 0, // Will be assigned by backend
+        ...this.courseForm.value
+      };
+
+      this.courseService.addCourse(courseData).subscribe({
+        next: (response) => {
+          // Navigate to course list page on successful submission
+          this.router.navigate(['/courses']);
+        },
+        error: (error) => {
+          console.error('Error submitting course:', error);
+        }
+      });
+    } else {
+      // Mark all form controls as touched to trigger validation messages
+      this.markFormGroupTouched(this.courseForm);
+    }
+  }
+
+  private markFormGroupTouched(formGroup: FormGroup): void {
+    Object.keys(formGroup.controls).forEach(key => {
+      const control = formGroup.get(key);
+      if (control) {
+        control.markAsTouched();
+        if (control instanceof FormGroup) {
+          this.markFormGroupTouched(control);
+        }
+      }
+    });
+  }
+}
+
+// ===== COMPONENT TEMPLATES =====
+
+/* 
+course-details.component.html
+<div class="course-details" *ngIf="course$ | async as course">
+  <h2>{{ course.courseName }}</h2>
+  <div class="course-info">
+    <p><strong>ID:</strong> {{ course.id }}</p>
+    <p><strong>Enrollment Count:</strong> {{ course.enrollmentCount }}</p>
+    <p><strong>Publish Date:</strong> {{ course.publishDate | date }}</p>
+    <p><strong>Status:</strong> {{ course.status }}</p>
+    <p><strong>Category:</strong> {{ course.category }}</p>
+  </div>
+  <button routerLink="/courses" class="btn btn-secondary">Back to Courses</button>
+</div>
+*/
+
+/* 
+course-list.component.html
+<div class="course-list">
+  <h2>EdTech Courses</h2>
+  
+  <div class="search-container">
+    <input 
+      type="text" 
+      placeholder="Search courses by name or ID..." 
+      (input)="searchCourses($event)"
+      class="search-input">
+  </div>
+
+  <div class="courses-grid" *ngIf="filteredCourses$ | async as courses">
+    <div *ngFor="let course of courses" class="course-card">
+      <h3>{{ course.courseName }}</h3>
+      <p>Enrollment: {{ course.enrollmentCount }}</p>
+      <p>Status: {{ course.status }}</p>
+      <p>Category: {{ course.category }}</p>
+      <button 
+        [routerLink]="['/course', course.id]" 
+        class="btn btn-primary">
+        View Details
+      </button>
+    </div>
+  </div>
+
+  <button routerLink="/course/new" class="btn btn-success">Add New Course</button>
+</div>
+*/
+
+/* 
+course-form.component.html
+<div class="course-form">
+  <h2>Add New Course</h2>
+  
+  <form [formGroup]="courseForm" (ngSubmit)="onSubmit()">
+    <div class="form-group">
+      <label for="courseName">Course Name *</label>
+      <input 
+        type="text" 
+        id="courseName"
+        formControlName="courseName"
+        class="form-control"
+        [class.is-invalid]="courseForm.get('courseName')?.touched && courseForm.get('courseName')?.errors">
+      <div *ngIf="courseForm.get('courseName')?.touched && courseForm.get('courseName')?.errors?.['required']" 
+           class="invalid-feedback">
+        Course name is required.
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label for="enrollmentCount">Enrollment Count *</label>
+      <input 
+        type="number" 
+        id="enrollmentCount"
+        formControlName="enrollmentCount"
+        min="1"
+        class="form-control"
+        [class.is-invalid]="courseForm.get('enrollmentCount')?.touched && courseForm.get('enrollmentCount')?.errors">
+      <div *ngIf="courseForm.get('enrollmentCount')?.touched && courseForm.get('enrollmentCount')?.errors?.['required']" 
+           class="invalid-feedback">
+        Enrollment count is required.
+      </div>
+      <div *ngIf="courseForm.get('enrollmentCount')?.touched && courseForm.get('enrollmentCount')?.errors?.['min']" 
+           class="invalid-feedback">
+        Minimum enrollment count is 1.
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label for="status">Status</label>
+      <select 
+        id="status"
+        formControlName="status"
+        class="form-control">
+        <option *ngFor="let status of courseStatus" [value]="status">{{ status }}</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label for="publishDate">Publish Date * (YYYY-MM-DD)</label>
+      <input 
+        type="date" 
+        id="publishDate"
+        formControlName="publishDate"
+        class="form-control"
+        [class.is-invalid]="courseForm.get('publishDate')?.touched && courseForm.get('publishDate')?.errors">
+      <div *ngIf="courseForm.get('publishDate')?.touched && courseForm.get('publishDate')?.errors?.['required']" 
+           class="invalid-feedback">
+        Publish date is required.
+      </div>
+      <div *ngIf="courseForm.get('publishDate')?.touched && courseForm.get('publishDate')?.errors?.['invalidDate']" 
+           class="invalid-feedback">
+        Please enter date in YYYY-MM-DD format.
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label for="category">Category *</label>
+      <input 
+        type="text" 
+        id="category"
+        formControlName="category"
+        placeholder="e.g., Science, Arts, Programming"
+        class="form-control"
+        [class.is-invalid]="courseForm.get('category')?.touched && courseForm.get('category')?.errors">
+      <div *ngIf="courseForm.get('category')?.touched && courseForm.get('category')?.errors?.['required']" 
+           class="invalid-feedback">
+        Category is required.
+      </div>
+    </div>
+
+    <div class="form-buttons">
+      <button type="submit" class="btn btn-primary" [disabled]="courseForm.invalid">
+        Submit Course
+      </button>
+      <button type="button" routerLink="/courses" class="btn btn-secondary">
+        Cancel
+      </button>
+    </div>
+  </form>
+</div>
+*/
+
+// ===== APP MODULE =====
+
+// app.module.ts
+import { NgModule } from '@angular/core';
+import { BrowserModule } from '@angular/platform-browser';
+import { HttpClientModule } from '@angular/common/http';
+import { ReactiveFormsModule } from '@angular/forms';
+import { RouterModule, Routes } from '@angular/router';
+
+import { AppComponent } from './app.component';
+import { CourseDetailsComponent } from './components/course-details.component';
+import { CourseListComponent } from './components/course-list.component';
+import { CourseFormComponent } from './components/course-form.component';
+import { CourseService } from './services/course.service';
+
+const routes: Routes = [
+  { path: '', redirectTo: '/courses', pathMatch: 'full' },
+  { path: 'courses', component: CourseListComponent },
+  { path: 'course/new', component: CourseFormComponent },
+  { path: 'course/:id', component: CourseDetailsComponent }
+];
+
+@NgModule({
+  declarations: [
+    AppComponent,
+    CourseDetailsComponent,
+    CourseListComponent,
+    CourseFormComponent
+  ],
+  imports: [
+    BrowserModule,
+    HttpClientModule,
+    ReactiveFormsModule,
+    RouterModule.forRoot(routes)
+  ],
+  providers: [CourseService],
+  bootstrap: [AppComponent]
+})
+export class AppModule { }
+
+// ===== ENVIRONMENT =====
+
+// environments/environment.ts
+export const environment = {
+  production: false,
+  apiUrl: 'http://localhost:3000/api' // Base URL for course-related API endpoints
+};
